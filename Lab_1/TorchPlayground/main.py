@@ -4,7 +4,7 @@ from TorchPlayground.dataset import Circles, Moons
 from TorchPlayground.net import StudyAI
 from TorchPlayground.trainer import Trainer, get_data_from_datasets, predict_proba_om_mesh_tensor
 from TorchPlayground.visualize_utils import make_meshgrid, plot_predictions
-
+import os
 
 if __name__ == "__main__":
 
@@ -26,6 +26,17 @@ if __name__ == "__main__":
 
     train_dataloader = DataLoader(train_dataset, batch_size=50, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=50, shuffle=True)
+
+
+    path = "/nn_predictions"
+
+    try:
+        os.mkdir(os.getcwd() + path)
+    except OSError:
+        print("Создать директорию %s не удалось" % path)
+    else:
+        print("Успешно создана директория %s " % path)
+
 
     trainer.fit(train_dataloader, n_epochs=20)
 

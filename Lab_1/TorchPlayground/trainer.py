@@ -4,11 +4,7 @@ import numpy as np
 import torch
 from torch.nn import CrossEntropyLoss
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-
-from dataset import Circles
-from net import StudyAI
-from visualize_utils import make_meshgrid, predict_proba_om_mesh, plot_predictions
+from visualize_utils import make_meshgrid, plot_predictions
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -23,7 +19,7 @@ class Trainer:
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
 
         cuda = torch.cuda.is_available()
-        self.device = torch.device("coda:0" if cuda else "cpu")
+        self.device = torch.device("cuda:0" if cuda else "cpu")
 
         self.experiment_name = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.writer = SummaryWriter('runs/' + self.experiment_name)
@@ -133,25 +129,25 @@ def predict_proba_om_mesh_tensor(clf, xx, yy):
     Z = clf.predict_proba_tensor(q)[:, 1]
     Z = Z.reshape(xx.shape)
     return Z
-
-if __name__ == "__main__":
-
-    layers_list_example = [(2, 5), (5, 2)]
-    model = StudyAI(layers_list_example)
-
-    trainer = Trainer(model, lr=0.01)
-    print(trainer.device)
-
-    train_dataset = Circles(n_samples=5000, shuffle=True, noise=0.1, random_state=0, factor=.5)
-    test_dataset = Circles(n_samples=1000, shuffle=True, noise=0.1, random_state=2, factor=.5)
-
-    print(train_dataset)
-
-
-    train_dataloader = DataLoader(train_dataset, batch_size=50, shuffle=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=50, shuffle=True)
-
-    trainer.fit(train_dataloader, n_epochs=100)
-
-
-    test_predicion_proba = trainer.predict_proba(test_dataloader)
+#
+# if __name__ == "__main__":
+#
+#     layers_list_example = [(2, 5), (5, 2)]
+#     model = StudyAI(layers_list_example)
+#
+#     trainer = Trainer(model, lr=0.01)
+#     print(trainer.device)
+#
+#     train_dataset = Circles(n_samples=5000, shuffle=True, noise=0.1, random_state=0, factor=.5)
+#     test_dataset = Circles(n_samples=1000, shuffle=True, noise=0.1, random_state=2, factor=.5)
+#
+#     print(train_dataset)
+#
+#
+#     train_dataloader = DataLoader(train_dataset, batch_size=50, shuffle=True)
+#     test_dataloader = DataLoader(test_dataset, batch_size=50, shuffle=True)
+#
+#     trainer.fit(train_dataloader, n_epochs=100)
+#
+#
+#     test_predicion_proba = trainer.predict_proba(test_dataloader)
