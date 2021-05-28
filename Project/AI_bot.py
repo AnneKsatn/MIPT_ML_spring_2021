@@ -1,37 +1,41 @@
 import sc2
-from sc2 import run_game, maps, Race, Difficulty, position, Result
+from sc2 import run_game, maps, Race, Difficulty, Result
 from sc2.player import Bot, Computer
+from sc2 import position
 from sc2.constants import NEXUS, PROBE, PYLON, ASSIMILATOR, GATEWAY, \
- CYBERNETICSCORE, STARGATE, VOIDRAY, OBSERVER, ROBOTICSFACILITY
+ CYBERNETICSCORE, STARGATE, VOIDRAY, SCV, DRONE, ROBOTICSFACILITY, OBSERVER
 import random
 import cv2
 import numpy as np
+import os
 import time
+import keras
+
 from constants import draw_dict
 
 HEADLESS = False
 
-
-class Bot(sc2.BotAI):
-    def __init__(self):
+class AIBot(sc2.BotAI):
+    def __init__(self, use_model=False):
         self.ITERATIONS_PER_MINUTE = 165
         self.curr_moment = 0
+        self.use_model = use_model
+
         self.train_data = []
 
+        if self.use_model:
+            print("USING MODEL!")
+            self.model = keras.models.load_model("model")
+
     def on_end(self, game_result):
-        path="/train_data"
+        print('--- on_end called ---')
+        print(game_result, self.use_model)
 
-        try:
-        	os.mkdir(os.getcwd() + path)
-        except OSError:
-        	print("Создать директорию %s не удалось" % path)
-
-        else:
-        	print("Директория успешно создана")
-
-
-        if game_result == Result.Victory:
-            np.save("train_data/{}.npy".format(str(int(time.time()))), np.array(self.train_data))
+        with open("gameout-random-vs-medium.txt","a") as f:
+            if self.use_model:
+                f.write("Model {}\n".format(game_result))
+            else:
+                f.write("Random {}\n".format(game_result))
 
     async def on_step(self, iteration):
         self.iteration = iteration
@@ -46,8 +50,32 @@ class Bot(sc2.BotAI):
         await self.intel()
         await self.attack()
 
+    def random_location_variance(self, enemy_start_location):
+        x = enemy_start_location[0]
+        y = enemy_start_location[1]
+
+        x += ((random.randrange(-20, 20))/100) * self.game_info.map_size[0]
+        y += ((random.randrange(-20, 20))/100) * self.game_info.map_size[1]
+
+        if x < 0:
+            print("x below")
+            x = 0
+        if y < 0:
+            print("y below")
+            y = 0
+        if x > self.game_info.map_size[0]:
+            print("x above")
+            x = self.game_info.map_size[0]
+        if y > self.game_info.map_size[1]:
+            print("y above")
+            y = self.game_info.map_size[1]
+
+        go_to = position.Point2(position.Pointlike((x,y)))
+
+        return go_to
 
     async def scout(self):
+
         if len(self.units(OBSERVER)) > 0:
             scout = self.units(OBSERVER)[0]
             if scout.is_idle:
@@ -62,14 +90,16 @@ class Bot(sc2.BotAI):
                     await self.do(rf.train(OBSERVER))
 
     async def intel(self):
+
         game_data = np.zeros((self.game_info.map_size[1], self.game_info.map_size[0], 3), np.uint8)
+
 
         for unit_type in draw_dict:
             for unit in self.units(unit_type).ready:
                 pos = unit.position
                 cv2.circle(game_data, (int(pos[0]), int(pos[1])), draw_dict[unit_type][0], draw_dict[unit_type][1], -1)
 
-        main_base_names = ["nexus", "supplydepot", "hatchery"]
+        main_base_names = ["nexus", "commandcenter", "hatchery"]
         for enemy_building in self.known_enemy_structures:
             pos = enemy_building.position
             if enemy_building.name.lower() not in main_base_names:
@@ -85,9 +115,14 @@ class Bot(sc2.BotAI):
                 pos = enemy_unit.position
                 cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (55, 0, 155), -1)
 
+
         for obs in self.units(OBSERVER).ready:
             pos = obs.position
             cv2.circle(game_data, (int(pos[0]), int(pos[1])), 1, (255, 255, 255), -1)
+
+        for vr in self.units(VOIDRAY).ready:
+            pos = vr.position
+            cv2.circle(game_data, (int(pos[0]), int(pos[1])), 3, (255, 100, 0), -1)
 
         line_max = 50
         mineral_ratio = self.minerals / 1500
@@ -110,16 +145,21 @@ class Bot(sc2.BotAI):
 
         cv2.line(game_data, (0, 19), (int(line_max*military_weight), 19), (250, 250, 200), 3) 
         cv2.line(game_data, (0, 15), (int(line_max*plausible_supply), 15), (220, 200, 200), 3)  
-        cv2.line(game_data, (0, 11), (int(line_max*population_ratio), 11), (150, 150, 150), 3) 
-        cv2.line(game_data, (0, 7), (int(line_max*vespene_ratio), 7), (210, 200, 0), 3)
-        cv2.line(game_data, (0, 3), (int(line_max*mineral_ratio), 3), (0, 255, 25), 3)  
-main_base_names
+        cv2.line(game_data, (0, 11), (int(line_max*population_ratio), 11), (150, 150, 150), 3)  # population ratio (supply_left/supply)
+        cv2.line(game_data, (0, 7), (int(line_max*vespene_ratio), 7), (210, 200, 0), 3)  # gas / 1500
+        cv2.line(game_data, (0, 3), (int(line_max*mineral_ratio), 3), (0, 255, 25), 3)  # minerals minerals/1500
+
+        # flip horizontally to make our final fix in visual representation:
         self.flipped = cv2.flip(game_data, 0)
+        resized = cv2.resize(self.flipped, dsize=None, fx=2, fy=2)
 
         if not HEADLESS:
-            resized = cv2.resize(self.flipped, dsize=None, fx=2, fy=2)
-            cv2.imshow('Intel', resized)
-            cv2.waitKey(1)
+            if self.use_model:
+                cv2.imshow('Model Intel', resized)
+                cv2.waitKey(1)
+            else:
+                cv2.imshow('Random Intel', resized)
+                cv2.waitKey(1)
 
     async def build_workers(self):
         if (len(self.units(NEXUS)) * 16) > len(self.units(PROBE)):
@@ -147,29 +187,11 @@ main_base_names
                     await self.do(worker.build(ASSIMILATOR, vaspene))
 
     async def expand(self):
-        if self.units(NEXUS).amount < (self.iteration / self.ITERATIONS_PER_MINUTE) and self.can_afford(NEXUS):
-            await self.expand_now()
-
-
-    def random_location_variance(self, enemy_start_location):
-        x = enemy_start_location[0]
-        y = enemy_start_location[1]
-
-        x += ((random.randrange(-20, 20))/100) * enemy_start_location[0]
-        y += ((random.randrange(-20, 20))/100) * enemy_start_location[1]
-
-        if x < 0:
-            x = 0
-        if y < 0:
-            y = 0
-        if x > self.game_info.map_size[0]:
-            x = self.game_info.map_size[0]
-        if y > self.game_info.map_size[1]:
-            y = self.game_info.map_size[1]
-
-        go_to = position.Point2(position.Pointlike((x,y)))
-        return go_to
-        
+        try:
+            if self.units(NEXUS).amount < (self.iteration / self.ITERATIONS_PER_MINUTE)/2 and self.can_afford(NEXUS):
+                await self.expand_now()
+        except Exception as e:
+            print(str(e))
 
     async def offensive_force_buildings(self):
         if self.units(PYLON).ready.exists:
@@ -207,12 +229,22 @@ main_base_names
             return self.enemy_start_locations[0]
 
     async def attack(self):
+
         if len(self.units(VOIDRAY).idle) > 0:
-            choice = random.randrange(0, 4)
+
             target = False
+
             if self.iteration > self.curr_moment:
+                if self.use_model:
+                    prediction = self.model.predict([self.flipped.reshape([-1, 176, 200, 3])])
+                    choice = np.argmax(prediction[0])
+
+                else:
+                    choice = random.randrange(0, 4)
+
+
                 if choice == 0:
-                    wait = random.randrange(20, 165)
+                    wait = random.randrange(20,165)
                     self.curr_moment = self.iteration + wait
 
                 elif choice == 1:
@@ -229,12 +261,13 @@ main_base_names
                 if target:
                     for vr in self.units(VOIDRAY).idle:
                         await self.do(vr.attack(target))
+
                 y = np.zeros(4)
                 y[choice] = 1
-                print(y)
                 self.train_data.append([y,self.flipped])
 
-run_game(maps.get("AbyssalReefLE"), [
-    Bot(Race.Protoss, SentdeBot()),
-    Computer(Race.Terran, Difficulty.Easy)
-    ], realtime=False)
+for i in range(100):
+    run_game(maps.get("AbyssalReefLE"), [
+        Bot(Race.Protoss, SentdeBot(use_model=True)),
+        Computer(Race.Protoss, Difficulty.Medium),
+        ], realtime=False)
